@@ -1,0 +1,1066 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#d7d8d2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#2b2d30" media="(prefers-color-scheme: dark)">
+<title>株数計算</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDGothic:wght@700&family=BIZ+UDPGothic:wght@400;700&display=swap">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  /* A desk calculator: moulded plastic body, a bezel-framed LCD, keys with real travel. */
+  :root {
+    --plastic: #d7d8d2;
+    --plastic-deep: #c4c5bf;
+    --ink: #2a2c29;
+    --ink-soft: #565952;
+    --bezel: #3a3d41;
+    --lcd: #bac3a5;
+    --lcd-shade: #a3ad8e;
+    --lcd-ink: #1a1f12;
+    --lcd-faint: rgb(26 31 18 / .14);
+    --key: #f4f4f0;
+    --key-ink: #2a2c29;
+    --key-edge: #a9aaa3;
+    --key-dark: #3a3d41;
+    --key-dark-ink: #f4f4f0;
+    --key-dark-edge: #1f2124;
+    --signal: #c9302c;
+    --signal-edge: #85201d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --plastic: #2b2d30;
+      --plastic-deep: #1f2023;
+      --ink: #e4e4de;
+      --ink-soft: #9a9c96;
+      --bezel: #141517;
+      --lcd: #9da78a;
+      --lcd-shade: #848e72;
+      --lcd-ink: #10140a;
+      --lcd-faint: rgb(16 20 10 / .16);
+      --key: #4a4d52;
+      --key-ink: #f0f0ea;
+      --key-edge: #232528;
+      --key-dark: #1d1e21;
+      --key-dark-ink: #e4e4de;
+      --key-dark-edge: #08090a;
+      --signal: #d2433a;
+      --signal-edge: #6e1a16;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overscroll-behavior: none; }
+  body {
+    background: var(--plastic);
+    color: var(--ink);
+    font-family: "BIZ UDPGothic", system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  button { font: inherit; color: inherit; touch-action: manipulation; }
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+  body[data-mode="fx"] .shares-only, body[data-mode="shares"] .fx-only { display: none !important; }
+
+  /* The calculator has a fixed body size: it fills a phone screen, and on taller windows it sits centred
+     instead of stretching, so no dead band opens up between the display and the keys. */
+  body { display: flex; }
+  .app {
+    width: 100%;
+    max-width: 480px;
+    height: 100%;
+    max-height: 900px;
+    margin: auto;
+    padding: calc(env(safe-area-inset-top) + 6px) 14px calc(env(safe-area-inset-bottom) + 12px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* ---- header: mode slide switch + settings ---- */
+  .top { display: flex; align-items: center; justify-content: space-between; }
+  .tabs {
+    display: grid; grid-template-columns: 1fr 1fr;
+    background: var(--plastic-deep);
+    border-radius: 8px; padding: 3px;
+    box-shadow: inset 0 1px 3px rgb(0 0 0 / .3);
+  }
+  .tabs button {
+    border: 0; background: transparent; cursor: pointer;
+    min-height: 34px; padding: 0 16px; border-radius: 6px;
+    font-size: 13px; font-weight: 700; color: var(--ink-soft);
+  }
+  .tabs button[aria-selected="true"] {
+    background: var(--key-dark); color: var(--key-dark-ink);
+    box-shadow: 0 2px 0 var(--key-dark-edge);
+  }
+  .icon-btn {
+    min-width: 44px; min-height: 44px;
+    border: 0; border-radius: 10px; background: transparent;
+    font-size: 20px; cursor: pointer; color: var(--ink-soft);
+  }
+  .icon-btn:disabled { opacity: .4; }
+
+  /* ---- the LCD ---- */
+  .bezel { background: var(--bezel); border-radius: 14px; padding: 7px; }
+  .lcd {
+    background: var(--lcd);
+    color: var(--lcd-ink);
+    border-radius: 7px;
+    box-shadow: inset 0 3px 0 var(--lcd-shade), inset 0 0 0 1px rgb(0 0 0 / .2);
+    padding: 8px 12px 6px;
+    display: flex; flex-direction: column;
+  }
+  /* UD digits: designed so 1/7, 3/8, 5/6 can't be confused, and fixed-width so places line up. */
+  .seg { font-family: "BIZ UDGothic", "BIZ UDPGothic", sans-serif; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .lcd-result { padding: 4px 0 8px; border-bottom: 1px solid var(--lcd-faint); }
+  .shares-line { display: flex; align-items: flex-end; justify-content: space-between; }
+  .shares-line .caption { font-size: 12px; padding-bottom: 8px; }
+  .shares { font-size: calc(var(--shares-size, 54px) * var(--shrink, 1)); line-height: 1.1; }
+  .shares-unit { font-size: 18px; font-weight: 700; margin-left: 6px; }
+  .breakdown { margin: 2px 0 0; display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 2px; font-size: 12px; }
+  .breakdown dt { align-self: center; }
+  .breakdown dd { margin: 0; text-align: right; font-size: 16px; }
+  .next { margin: 4px 0 0; font-size: 12px; text-align: right; }
+  .next:empty { display: none; }
+
+  .field {
+    display: grid; grid-template-columns: 12px auto 1fr; align-items: center; column-gap: 6px;
+    width: 100%; min-height: 46px;
+    padding: 4px 0;
+    background: transparent; border: 0; border-bottom: 1px solid var(--lcd-faint);
+    color: var(--lcd-ink); text-align: right; cursor: pointer;
+  }
+  .lcd > :last-child .field, .lcd > .field:last-child { border-bottom: 0; }
+  .field::before { content: ""; grid-row: 1 / span 2; font-size: 10px; }
+  .field.active::before { content: "▶"; }
+  .field .label { font-size: 12px; text-align: left; white-space: nowrap; display: flex; gap: 6px; align-items: center; }
+  .field .value {
+    display: flex; justify-content: flex-end; align-items: baseline;
+    overflow: hidden; white-space: nowrap; /* long expressions overflow to the left, keeping the tail visible */
+    font-size: 24px;
+  }
+  .field .value > span { flex: none; }
+  .field .expr { font-family: "BIZ UDGothic", "BIZ UDPGothic", sans-serif; font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 2px; }
+  .field .unit { font-size: .6em; font-weight: 700; margin-right: 4px; }
+  .field .empty { color: rgb(26 31 18 / .35); }
+  .field .dec { font-size: .62em; opacity: .5; }
+  .sep { margin: 0 -.07em; }
+  .field.active.fresh .expr { background: var(--lcd-faint); border-radius: 3px; }
+  .field.active:not(.fresh) .expr::after {
+    content: ""; display: inline-block; width: .5em; height: 3px; margin-left: 3px;
+    background: var(--lcd-ink);
+    animation: blink 1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .field.active:not(.fresh) .expr::after { animation: none; } }
+  .field .preview { grid-column: 3; font-size: 11px; }
+  .field .preview:empty { display: none; }
+
+  .fx { display: flex; flex-direction: column; }
+  .fx .field { min-height: 72px; }
+  .fx .field .value { font-size: 34px; }
+  .fx [data-field="usd"] { order: 0; }
+  .fx [data-field="jpy"] { order: 1; }
+  body[data-fx-top="jpy"] .fx [data-field="jpy"] { order: 0; }
+  body[data-fx-top="jpy"] .fx [data-field="usd"] { order: 1; }
+  .fx .field[data-field] { border-bottom: 1px solid var(--lcd-faint); }
+
+  /* annunciators: small inverse tags, like the M / GT marks on a calculator display */
+  .chip {
+    font-size: 10px; font-weight: 700; line-height: 1;
+    padding: 3px 5px; border-radius: 2px;
+    background: var(--lcd-ink); color: var(--lcd);
+    border: 0;
+  }
+  .chip[hidden] { display: none; }
+
+  /* ---- printed text and controls on the body ---- */
+  .print { margin: 0 4px; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
+  .print:empty { display: none; }
+  .print.warn { color: var(--signal); font-weight: 700; }
+  .console { display: flex; gap: 8px; align-items: stretch; }
+  .ticker {
+    flex: 1; display: flex; align-items: center; gap: 8px;
+    background: var(--lcd); color: var(--lcd-ink);
+    border-radius: 7px; padding: 0 10px; min-height: 40px;
+    box-shadow: inset 0 2px 0 var(--lcd-shade), 0 0 0 4px var(--bezel);
+    margin: 4px;
+  }
+  .ticker span { font-size: 11px; white-space: nowrap; }
+  .ticker input {
+    text-transform: uppercase;
+    flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--lcd-ink);
+    font: inherit; font-size: 18px; font-weight: 700; letter-spacing: .06em;
+    -webkit-user-select: text; user-select: text;
+  }
+  .ticker input::placeholder { color: var(--lcd-faint); }
+  .ticker:focus-within { box-shadow: inset 0 2px 0 var(--lcd-shade), 0 0 0 4px var(--bezel), 0 0 0 6px var(--signal); }
+  .console .spacer { flex: 1; }
+  .small-key {
+    min-height: 40px; padding: 0 14px; border: 0; border-radius: 8px; cursor: pointer;
+    background: var(--key-dark); color: var(--key-dark-ink);
+    box-shadow: 0 3px 0 var(--key-dark-edge);
+    font-size: 13px; font-weight: 700; white-space: nowrap;
+    margin-bottom: 3px;
+  }
+  .small-key:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--key-dark-edge); }
+  .small-key:disabled { opacity: .5; }
+  .status {
+    display: flex; gap: 6px; align-items: center; justify-content: flex-end;
+    margin: 0 4px; font-size: 12px; color: var(--ink-soft); min-height: 1.5em;
+  }
+  .status .error { color: var(--signal); font-weight: 700; }
+  .status .link {
+    border: 0; background: transparent; padding: 8px 4px; margin: -8px 0; cursor: pointer;
+    font-size: 12px; font-weight: 700; color: var(--ink); text-decoration: underline;
+  }
+  .status .link[hidden] { display: none; }
+  .status:has(> span:empty):has(> .link[hidden]) { display: none; }
+
+  /* ---- keypad ---- */
+  /* The keypad absorbs leftover height so there is no dead gap mid-screen; capped so keys stay key-shaped on tall windows. */
+  .keypad {
+    flex: 1 1 auto; margin-top: auto;
+    display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 1fr; gap: 9px 8px;
+    min-height: calc(5 * 42px + 4 * 9px); max-height: 540px;
+    padding-bottom: 3px;
+  }
+  .keypad button {
+    border: 0; border-radius: 10px; cursor: pointer;
+    background: var(--key); color: var(--key-ink);
+    box-shadow: 0 3px 0 var(--key-edge);
+    font-size: 24px; font-weight: 700;
+  }
+  .keypad button:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--key-edge); }
+  .keypad .op, .keypad .fn, .keypad .go {
+    background: var(--key-dark); color: var(--key-dark-ink); box-shadow: 0 3px 0 var(--key-dark-edge);
+  }
+  .keypad .op:active, .keypad .fn:active, .keypad .go:active { box-shadow: 0 1px 0 var(--key-dark-edge); }
+  .keypad .fn { font-size: 20px; }
+  .keypad .go { font-size: 17px; }
+  .keypad .clear { background: var(--signal); color: #fff; box-shadow: 0 3px 0 var(--signal-edge); }
+  .keypad .clear:active { box-shadow: 0 1px 0 var(--signal-edge); }
+
+  .toast {
+    position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 12px); transform: translateX(-50%);
+    margin: 0; padding: 8px 14px; border-radius: 8px;
+    background: var(--key-dark); color: var(--key-dark-ink); box-shadow: 0 3px 0 var(--key-dark-edge);
+    font-size: 13px; font-weight: 700; pointer-events: none;
+  }
+  .toast:empty { display: none; }
+
+  /* Short screens: tighten the display so the keypad keeps a usable size without scrolling. */
+  @media (max-height: 700px) {
+    :root { --shares-size: 42px; }
+    .lcd { padding: 4px 10px 2px; }
+    .lcd-result { padding: 0 0 4px; }
+    .field { min-height: 38px; padding: 2px 0; }
+    .field .value { font-size: 20px; }
+    .fx .field { min-height: 56px; }
+    .fx .field .value { font-size: 28px; }
+    .breakdown dd { font-size: 14px; }
+    .app { gap: 6px; }
+    .keypad { min-height: calc(5 * 40px + 4 * 8px); gap: 8px; }
+  }
+
+  /* ---- settings ---- */
+  dialog {
+    width: min(440px, calc(100% - 32px));
+    border: 0; border-radius: 16px; padding: 20px;
+    background: var(--plastic); color: var(--ink);
+    -webkit-user-select: text; user-select: text;
+  }
+  dialog::backdrop { background: rgb(0 0 0 / .5); }
+  dialog h2 { margin: 0 0 16px; font-size: 18px; }
+  .setting { display: block; margin-bottom: 14px; }
+  .setting > span { display: block; font-size: 13px; color: var(--ink-soft); margin-bottom: 4px; }
+  .setting input {
+    width: 100%; font: inherit; font-size: 16px;
+    padding: 11px 12px; border-radius: 8px;
+    border: 0; background: var(--lcd); color: var(--lcd-ink);
+    box-shadow: inset 0 2px 0 var(--lcd-shade);
+  }
+  .setting small { display: block; font-size: 11px; color: var(--ink-soft); margin-top: 4px; line-height: 1.6; }
+  .setting a { color: var(--ink); font-weight: 700; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; margin-bottom: 16px; }
+  .check input { width: 22px; height: 22px; margin: 0; accent-color: var(--key-dark); flex: none; }
+  .primary {
+    width: 100%; min-height: 48px; border: 0; border-radius: 10px; cursor: pointer;
+    background: var(--key-dark); color: var(--key-dark-ink); box-shadow: 0 3px 0 var(--key-dark-edge);
+    font-weight: 700; font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="top">
+    <div class="tabs" role="tablist" aria-label="モード">
+      <button type="button" role="tab" data-mode="fx">為替</button>
+      <button type="button" role="tab" data-mode="shares">株数</button>
+    </div>
+    <button id="openSettings" class="icon-btn" type="button" aria-label="設定">⚙</button>
+  </header>
+
+  <div class="bezel">
+    <section class="lcd">
+      <div class="lcd-result shares-only" aria-live="polite">
+        <div class="shares-line">
+          <span class="caption">買える株数</span>
+          <span><span id="shares" class="shares seg">–</span><span class="shares-unit">株</span></span>
+        </div>
+        <dl class="breakdown">
+          <dt>使う金額</dt><dd id="used" class="seg">–</dd>
+          <dt>残り</dt><dd id="left" class="seg">–</dd>
+        </dl>
+        <p id="next" class="next"></p>
+      </div>
+
+      <div class="fx fx-only">
+        <button type="button" class="field" data-field="usd">
+          <span class="label">USD</span>
+          <span class="value"><span class="unit">$</span><span class="expr"></span></span>
+          <span class="preview"></span>
+        </button>
+        <button type="button" class="field" data-field="jpy">
+          <span class="label">JPY</span>
+          <span class="value"><span class="unit">¥</span><span class="expr"></span></span>
+          <span class="preview"></span>
+        </button>
+      </div>
+
+      <button type="button" class="field shares-only" data-field="budget">
+        <span class="label">予算</span>
+        <span class="value"><span class="unit">¥</span><span class="expr"></span></span>
+        <span class="preview"></span>
+      </button>
+      <button type="button" class="field shares-only" data-field="price">
+        <span class="label">株価</span>
+        <span class="value"><span class="unit">$</span><span class="expr"></span></span>
+        <span class="preview"></span>
+      </button>
+      <div id="rateRow">
+        <button type="button" class="field" data-field="rate">
+          <span class="label">1ドル <span id="surge" class="chip" hidden></span><span id="stale" class="chip" hidden>古い</span></span>
+          <span class="value"><span class="unit">¥</span><span class="expr"></span></span>
+          <span class="preview"></span>
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <p id="fxNote" class="print fx-only" aria-live="polite"></p>
+  <p id="calcNote" class="print shares-only"></p>
+
+  <div class="console">
+    <label class="ticker shares-only">
+      <span>銘柄</span>
+      <input id="ticker" autocapitalize="characters" autocomplete="off" spellcheck="false" enterkeyhint="done" placeholder="AAPL">
+    </label>
+    <button id="fxSwap" class="small-key fx-only" type="button">USD ⇅ JPY</button>
+    <span class="spacer fx-only"></span>
+    <button id="refresh" class="small-key" type="button">更新</button>
+  </div>
+  <p class="status shares-only"><span id="priceStatus"></span><button id="priceManual" class="link" type="button" hidden>自動に戻す</button></p>
+  <p class="status"><span id="rateStatus"></span><button id="rateManual" class="link" type="button" hidden>自動に戻す</button></p>
+
+  <section class="keypad" aria-label="テンキー">
+    <button type="button" data-key="7">7</button>
+    <button type="button" data-key="8">8</button>
+    <button type="button" data-key="9">9</button>
+    <button type="button" data-key="÷" class="op" aria-label="割る">÷</button>
+    <button type="button" data-key="4">4</button>
+    <button type="button" data-key="5">5</button>
+    <button type="button" data-key="6">6</button>
+    <button type="button" data-key="×" class="op" aria-label="掛ける">×</button>
+    <button type="button" data-key="1">1</button>
+    <button type="button" data-key="2">2</button>
+    <button type="button" data-key="3">3</button>
+    <button type="button" data-key="-" class="op" aria-label="引く">−</button>
+    <button type="button" data-key="0">0</button>
+    <button type="button" data-key="00">00</button>
+    <button type="button" data-key=".">.</button>
+    <button type="button" data-key="+" class="op" aria-label="足す">+</button>
+    <button type="button" data-key="C" class="fn clear" aria-label="クリア">C</button>
+    <button type="button" data-key="⌫" class="fn" aria-label="1文字消す">⌫</button>
+    <button type="button" data-key="=" class="op" aria-label="計算">=</button>
+    <button type="button" data-key="next" class="go" aria-label="次の欄へ">次へ</button>
+  </section>
+</main>
+<p id="toast" class="toast" role="status"></p>
+
+<dialog id="settings">
+  <form method="dialog">
+    <h2>設定</h2>
+    <label class="setting">
+      <span>Twelve Data APIキー</span>
+      <input id="apiKey" autocomplete="off" spellcheck="false" placeholder="未設定ならレートは1日1回更新">
+      <small>
+        <a href="https://twelvedata.com/register" target="_blank" rel="noopener">無料登録</a>でキーを取得。キーはこの端末にだけ保存されます。
+        設定すると画面を開いている間、60秒ごとにレートと株価を更新します。
+      </small>
+    </label>
+    <div class="grid2">
+      <label class="setting">
+        <span>為替スプレッド (円)</span>
+        <input id="spread" inputmode="decimal">
+      </label>
+      <label class="setting">
+        <span>急変判定 (円/15分)</span>
+        <input id="surgeThreshold" inputmode="decimal">
+      </label>
+    </div>
+    <div class="grid2">
+      <label class="setting">
+        <span>手数料 (%)</span>
+        <input id="feePct" inputmode="decimal">
+      </label>
+      <label class="setting">
+        <span>手数料上限 ($)</span>
+        <input id="feeCap" inputmode="decimal">
+        <small>0で上限なし</small>
+      </label>
+    </div>
+    <label class="check">
+      <input id="safety" type="checkbox">
+      <span>急変動中は予算の98%で計算する</span>
+    </label>
+    <p class="setting"><small>液晶の数字は長押しでコピーできます。手入力したレートや株価は、次に開いたとき自動取得の値に戻ります。</small></p>
+    <button class="primary" value="close">閉じる</button>
+  </form>
+</dialog>
+
+<script>
+(() => {
+  'use strict';
+
+  const POLL_MS = 60_000;
+  const SURGE_WINDOW_MS = 15 * 60_000;
+  const DEFAULTS = { apiKey: '', spread: 0.25, feePct: 0.495, feeCap: 22, surgeThreshold: 0.5, safety: true };
+  const MODE_FIELDS = {
+    shares: () => ['budget', 'price', 'rate'],
+    fx: () => state.fxTop === 'jpy' ? ['jpy', 'usd', 'rate'] : ['usd', 'jpy', 'rate'],
+  };
+  const FIELDS = ['budget', 'price', 'rate', 'usd', 'jpy'];
+  const OPS = '+-×÷';
+
+  const $ = id => document.getElementById(id);
+  const el = {
+    shares: $('shares'), used: $('used'), left: $('left'), next: $('next'), calcNote: $('calcNote'), fxNote: $('fxNote'),
+    ticker: $('ticker'),
+    priceManual: $('priceManual'), rateManual: $('rateManual'), surge: $('surge'), rateRow: $('rateRow'),
+    priceStatus: $('priceStatus'), rateStatus: $('rateStatus'), refresh: $('refresh'),
+    settings: $('settings'), openSettings: $('openSettings'),
+    apiKey: $('apiKey'), spread: $('spread'), feePct: $('feePct'), feeCap: $('feeCap'),
+    surgeThreshold: $('surgeThreshold'), safety: $('safety'), stale: $('stale'), toast: $('toast'),
+  };
+  const fieldEl = Object.fromEntries(FIELDS.map(f => [f, document.querySelector(`.field[data-field="${f}"]`)]));
+
+  // ---- storage (may be unavailable in private mode) ----
+  const store = {
+    get(key, fallback) {
+      try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); }
+      catch { return fallback; }
+    },
+    set(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+    },
+  };
+
+  const settings = { ...DEFAULTS, ...store.get('settings', {}) };
+  const state = {
+    mode: store.get('mode', 'fx'),
+    usd: store.get('usd', 0),
+    jpy: store.get('jpy', 0),
+    fxSource: store.get('fxSource', 'usd'),
+    fxTop: store.get('fxTop', 'usd'),
+    budget: store.get('budget', 0),
+    ticker: store.get('ticker', ''),
+    price: store.get('price', 0),
+    rate: store.get('rate', 0),
+    priceManual: store.get('priceManual', false),
+    rateManual: store.get('rateManual', false),
+    priceAt: store.get('priceAt', 0),
+    rateAt: store.get('rateAt', 0),
+    rateSource: store.get('rateSource', ''),
+    autoRate: store.get('autoRate', 0),
+    autoPrice: store.get('autoPrice', 0),
+    rateError: '',
+    priceError: '',
+    history: store.get('history', []),
+  };
+
+  // ---- formatting ----
+  const yen = n => '¥' + Math.round(n).toLocaleString('ja-JP');
+  const parseNum = s => {
+    const n = parseFloat(String(s).replace(/[^\d.]/g, ''));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const timeStr = t => new Date(t).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const ago = t => {
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return `${s}秒前`;
+    if (s < 3600) return `${Math.floor(s / 60)}分前`;
+    if (s < 86400) return `${Math.floor(s / 3600)}時間前`;
+    return `${Math.floor(s / 86400)}日前`;
+  };
+
+  // ---- expressions ----
+  // Expressions alternate number / operator, which the keypad guarantees, so no parser is needed beyond precedence.
+  function evaluate(expr) {
+    const s = expr.replace(/[+\-×÷.]+$/, '');
+    if (!s) return 0;
+    const tokens = s.match(/\d+\.?\d*|\.\d+|[+\-×÷]/g) || [];
+    let total = 0, term = null, addOp = '+', mulOp = null;
+    for (const t of tokens) {
+      if (t === '+' || t === '-') {
+        total = addOp === '+' ? total + term : total - term;
+        addOp = t; term = null;
+      } else if (t === '×' || t === '÷') {
+        mulOp = t;
+      } else {
+        const n = parseFloat(t);
+        term = term === null ? n : (mulOp === '×' ? term * n : term / n);
+      }
+    }
+    total = addOp === '+' ? total + term : total - term;
+    return Number.isFinite(total) ? total : NaN;
+  }
+
+  const hasOp = expr => /[+\-×÷]/.test(expr);
+
+  function valueToExpr(field, v) {
+    if (!(v > 0)) return '';
+    if (field === 'budget' || field === 'jpy') return String(Math.round(v));
+    if (field === 'rate') return v.toFixed(3);
+    if (field === 'usd') return String(+v.toFixed(2));
+    return String(+v.toFixed(4));
+  }
+
+  function displayValue(field, v) {
+    if (field === 'budget' || field === 'jpy') return Math.round(v).toLocaleString('ja-JP');
+    if (field === 'rate') return v.toFixed(3);
+    if (field === 'usd') return v.toLocaleString('ja-JP', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (+v.toFixed(4)).toLocaleString('ja-JP', { maximumFractionDigits: 4 });
+  }
+
+  // Fixed-width digits give the comma a full cell; pull its neighbours in so groups read as one number.
+  const tightCommas = str => str.replace(/,/g, '<span class="sep">,</span>');
+
+  // Returns HTML; safe because the keypad only ever produces digits, '.', and operators.
+  function formatExpr(expr) {
+    return expr
+      .replace(/\d+(\.\d*)?/g, m => {
+        const [i, d] = m.split('.');
+        return tightCommas(Number(i).toLocaleString('ja-JP')) + (d !== undefined ? `<span class="dec">.${d}</span>` : '');
+      })
+      .replace(/-/g, '−');
+  }
+
+  const exprs = Object.fromEntries(FIELDS.map(f => [f, valueToExpr(f, state[f])]));
+  const defaultField = mode => mode === 'fx' ? state.fxSource : (state.budget ? 'price' : 'budget');
+  let active = defaultField(state.mode);
+  let fresh = true; // a freshly selected field is replaced by the first digit, like a selected input
+
+  function drawFields() {
+    for (const f of FIELDS) {
+      const node = fieldEl[f];
+      const e = exprs[f];
+      const exprEl = node.querySelector('.expr');
+      exprEl.innerHTML = e ? formatExpr(e) : '0';
+      exprEl.classList.toggle('empty', !e);
+      const v = evaluate(e);
+      node.querySelector('.preview').textContent =
+        hasOp(e) ? (v > 0 ? '= ' + displayValue(f, v) : '計算できません') : '';
+      node.classList.toggle('active', f === active);
+      node.setAttribute('aria-pressed', String(f === active));
+      node.classList.toggle('fresh', f === active && fresh);
+      node.classList.toggle('derived', f === fxDerived());
+    }
+  }
+
+  const fxDerived = () => state.fxSource === 'usd' ? 'jpy' : 'usd';
+
+  // The field the user typed in is the source; the other side is always recomputed from it.
+  function syncFx() {
+    const src = state.fxSource, dst = fxDerived();
+    const v = state[src], r = state.rate;
+    state[dst] = v > 0 && r > 0 ? (src === 'usd' ? v * r : v / r) : 0;
+    exprs[dst] = valueToExpr(dst, state[dst]);
+  }
+
+  function setMode(mode) {
+    commitField(active);
+    state.mode = mode;
+    document.body.dataset.mode = mode;
+    for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-selected', String(b.dataset.mode === mode));
+    active = defaultField(mode);
+    fresh = true;
+    store.set('mode', mode);
+    drawFields(); render();
+    if (mode === 'shares' && state.ticker && settings.apiKey && !state.priceManual) refresh();
+  }
+
+  function commitField(field) {
+    const v = evaluate(exprs[field]);
+    exprs[field] = valueToExpr(field, v);
+  }
+
+  function setActive(field) {
+    if (field !== active) commitField(active);
+    active = field;
+    fresh = true;
+    drawFields();
+  }
+
+  let touched = false;
+  function press(key) {
+    touched = true;
+    if (key === 'next') {
+      const order = MODE_FIELDS[state.mode]();
+      setActive(order[(order.indexOf(active) + 1) % order.length]);
+      return;
+    }
+    let e = exprs[active];
+    if (key === 'C') {
+      e = '';
+    } else if (key === '⌫') {
+      e = e.slice(0, -1);
+    } else if (key === '=') {
+      e = valueToExpr(active, evaluate(e));
+    } else if (OPS.includes(key)) {
+      if (!e) return;
+      e = e.replace(/[+\-×÷.]$/, '') + key;
+    } else {
+      if (fresh) e = '';
+      const last = e.match(/[\d.]*$/)[0];
+      if (key === '.') {
+        if (active === 'budget' || active === 'jpy' || last.includes('.')) return;
+        e += last ? '.' : '0.';
+      } else {
+        if (last === '0') e = e.slice(0, -1);
+        e += (key === '00' && (last === '' || last === '0')) ? '0' : key;
+      }
+      if (e.replace(/\D/g, '').length > 24) return;
+    }
+    fresh = key === '=';
+    exprs[active] = e;
+    fieldChanged(active);
+  }
+
+  function fieldChanged(field) {
+    const v = evaluate(exprs[field]);
+    state[field] = v > 0 ? v : 0;
+    if (field === 'price' && state.ticker) state.priceManual = true;
+    if (field === 'rate') { state.rateManual = true; state.rateError = ''; }
+    if (field === 'usd' || field === 'jpy') state.fxSource = field;
+    syncFx();
+    persist(); drawFields(); render();
+  }
+
+  // ---- calculation ----
+  function costYen(n, price, effRate) {
+    const usd = n * price;
+    const cap = settings.feeCap > 0 ? settings.feeCap : Infinity;
+    const fee = Math.min(usd * settings.feePct / 100, cap);
+    return (usd + fee) * effRate;
+  }
+
+  function calculate(budget, price, rate) {
+    const effRate = rate + settings.spread;
+    if (!(budget > 0 && price > 0 && rate > 0)) return null;
+    // cost(n) >= n * price * effRate, so this is an upper bound; binary search the max affordable n.
+    let lo = 0, hi = Math.floor(budget / (price * effRate));
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (costYen(mid, price, effRate) <= budget) lo = mid; else hi = mid - 1;
+    }
+    const used = costYen(lo, price, effRate);
+    return { n: lo, used, left: budget - used, extra: costYen(lo + 1, price, effRate) - budget, effRate };
+  }
+
+  function surgeInfo() {
+    const cutoff = Date.now() - SURGE_WINDOW_MS;
+    const recent = state.history.filter(h => h.t >= cutoff);
+    if (recent.length < 2) return null;
+    const rates = recent.map(h => h.r);
+    const range = Math.max(...rates) - Math.min(...rates);
+    return range >= settings.surgeThreshold ? range : null;
+  }
+
+  // ---- render ----
+  function render() {
+    const surge = surgeInfo();
+    const useSafety = surge != null && settings.safety && !state.rateManual;
+    const budget = useSafety ? state.budget * 0.98 : state.budget;
+    const r = calculate(budget, state.price, state.rate);
+
+    if (r) {
+      el.shares.innerHTML = tightCommas(r.n.toLocaleString('ja-JP'));
+      const len = el.shares.textContent.length;
+      el.shares.style.setProperty('--shrink', len <= 4 ? 1 : len <= 6 ? 0.78 : 0.6);
+      el.used.innerHTML = tightCommas(yen(r.used));
+      el.left.innerHTML = tightCommas(yen(state.budget - r.used));
+      el.next.textContent = `あと ${yen(r.extra)} で ${(r.n + 1).toLocaleString('ja-JP')}株`;
+      const feeNote = settings.feePct > 0 ? `、手数料${settings.feePct}%込み` : '';
+      el.calcNote.textContent = useSafety
+        ? `急変動中のため予算の98%・1ドル${r.effRate.toFixed(2)}円で計算`
+        : `1ドル${r.effRate.toFixed(2)}円で計算${feeNote}`;
+      el.calcNote.classList.toggle('warn', useSafety);
+    } else {
+      el.shares.textContent = '–';
+      el.shares.style.setProperty('--shrink', 1);
+      el.used.textContent = '–';
+      el.left.textContent = '–';
+      el.next.textContent = '';
+      const missing = [['予算', state.budget], ['株価', state.price], ['レート', state.rate]].filter(([, v]) => !(v > 0)).map(([n]) => n);
+      el.calcNote.textContent = `${missing.join('と')}を入れると計算します`;
+      el.calcNote.classList.remove('warn');
+    }
+
+    el.surge.hidden = surge == null;
+    if (surge != null) el.surge.textContent = `急変 ${surge.toFixed(2)}`;
+    el.rateRow.classList.toggle('rate-surge', surge != null);
+
+    const eff = state.rate + settings.spread;
+    const src = state[state.fxSource];
+    el.fxNote.classList.toggle('warn', !(state.rate > 0));
+    el.fxNote.textContent = !(state.rate > 0) ? 'レートがありません。更新を押すか、1ドルの欄に入力してください'
+      : !(src > 0) ? '金額を入れると換算します'
+      : state.fxSource === 'usd'
+        ? `ドル転コスト込み ${yen(src * eff)} (レート ${eff.toFixed(3)})`
+        : `ドル転コスト込みで $${(src / eff).toLocaleString('ja-JP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (レート ${eff.toFixed(3)})`;
+
+    el.rateManual.hidden = !state.rateManual;
+    el.priceManual.hidden = !(state.priceManual && state.ticker && settings.apiKey);
+    renderStatus();
+  }
+
+  function setStatus(node, text, isError) {
+    node.textContent = text;
+    node.classList.toggle('error', !!isError);
+  }
+
+  function renderStatus() {
+    const staleAfter = settings.apiKey ? 5 * 60_000 : 36 * 3600_000;
+    el.stale.hidden = state.rateManual || !state.rateAt || Date.now() - state.rateAt < staleAfter;
+    if (state.rateManual) {
+      setStatus(el.rateStatus, '手動入力中 (自動更新は停止)');
+    } else if (state.rateError) {
+      setStatus(el.rateStatus, `取得失敗: ${state.rateError}` + (state.rateAt ? ` / ${ago(state.rateAt)}の値を使用` : ''), true);
+    } else if (state.rateAt) {
+      setStatus(el.rateStatus, `${state.rateSource}を${ago(state.rateAt)}に取得 (${timeStr(state.rateAt)})`);
+    } else {
+      setStatus(el.rateStatus, '');
+    }
+
+    if (!state.ticker) {
+      setStatus(el.priceStatus, '');
+    } else if (!settings.apiKey) {
+      setStatus(el.priceStatus, '株価の自動取得にはAPIキーが必要です (⚙)');
+    } else if (state.priceManual) {
+      setStatus(el.priceStatus, '手動入力中');
+    } else if (state.priceError) {
+      setStatus(el.priceStatus, `取得失敗: ${state.priceError}`, true);
+    } else if (state.priceAt) {
+      setStatus(el.priceStatus, `${state.ticker}の株価を${ago(state.priceAt)}に取得`);
+    } else {
+      setStatus(el.priceStatus, '');
+    }
+  }
+
+  function persist() {
+    for (const k of ['mode', 'usd', 'jpy', 'fxSource', 'fxTop', 'budget', 'ticker', 'price', 'rate', 'priceManual', 'rateManual', 'priceAt', 'rateAt', 'rateSource', 'autoRate', 'autoPrice', 'history']) {
+      store.set(k, state[k]);
+    }
+  }
+
+  // ---- fetching ----
+  async function fetchJson(url) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10_000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function applyRate(rate, source) {
+    state.rate = rate;
+    state.rateAt = Date.now();
+    state.rateSource = source;
+    state.rateError = '';
+    state.autoRate = rate;
+    state.history.push({ t: state.rateAt, r: rate });
+    state.history = state.history.filter(h => h.t >= Date.now() - SURGE_WINDOW_MS);
+    exprs.rate = valueToExpr('rate', rate);
+    syncFx();
+  }
+
+  function applyPrice(price) {
+    state.price = price;
+    state.priceAt = Date.now();
+    state.priceError = '';
+    state.autoPrice = price;
+    exprs.price = valueToExpr('price', price);
+  }
+
+  async function fetchTwelveData() {
+    const symbols = [];
+    if (!state.rateManual) symbols.push('USD/JPY');
+    const wantPrice = state.mode === 'shares' && state.ticker && !state.priceManual;
+    if (wantPrice) symbols.push(state.ticker);
+    if (!symbols.length) return;
+
+    const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbols.join(','))}&apikey=${encodeURIComponent(settings.apiKey)}`;
+    const data = await fetchJson(url);
+    if (data.status === 'error' && !symbols.includes('USD/JPY') && (data.code === 400 || data.code === 404)) {
+      state.priceError = '銘柄が見つかりません';
+      return;
+    }
+    if (data.status === 'error') {
+      const known = { 401: 'APIキーが正しくありません', 429: 'API回数の上限に達しました' };
+      throw new Error(known[data.code] || 'APIエラー');
+    }
+
+    // A single symbol returns {price}, several return {SYMBOL: {price}}.
+    const pick = sym => (symbols.length === 1 ? data : data[sym]) || {};
+    if (!state.rateManual) {
+      const d = pick('USD/JPY');
+      const r = parseFloat(d.price);
+      if (r > 0) applyRate(r, 'Twelve Dataのレート');
+      else state.rateError = 'レートを取得できません';
+    }
+    if (wantPrice) {
+      const d = pick(state.ticker);
+      const p = parseFloat(d.price);
+      if (p > 0) applyPrice(p);
+      else state.priceError = d.message ? '銘柄が見つかりません' : '株価を取得できません';
+    }
+  }
+
+  async function fetchDailyRate() {
+    if (state.rateManual) return;
+    const data = await fetchJson('https://open.er-api.com/v6/latest/USD');
+    const r = data && data.rates && data.rates.JPY;
+    if (!(r > 0)) throw new Error('レートを取得できません');
+    applyRate(r, '日次レート');
+    // Daily rates say nothing about intraday moves; keep them out of surge detection.
+    state.history = [];
+  }
+
+  let inFlight = null;
+  function refresh() {
+    if (inFlight) return inFlight;
+    el.refresh.disabled = true;
+    el.refresh.textContent = '更新中…';
+    inFlight = (async () => {
+      try {
+        if (settings.apiKey) await fetchTwelveData();
+        else await fetchDailyRate();
+      } catch (e) {
+        // fetch() rejects with a TypeError when the network or DNS fails; that message is browser-specific English.
+        const msg = e.name === 'AbortError' ? 'タイムアウトしました'
+          : !navigator.onLine ? 'オフラインです'
+          : e instanceof TypeError ? '通信できません' : e.message;
+        state.rateError = msg;
+        if (state.ticker && settings.apiKey) state.priceError = msg;
+      } finally {
+        inFlight = null;
+        el.refresh.disabled = false;
+        el.refresh.textContent = '更新';
+        persist();
+        drawFields();
+        render();
+      }
+    })();
+    return inFlight;
+  }
+
+  // Poll only while the app is visible, so the free-tier quota isn't spent in the background.
+  let pollTimer = null;
+  function startPolling() {
+    stopPolling();
+    if (document.visibilityState !== 'visible') return;
+    const interval = settings.apiKey ? POLL_MS : 60 * 60_000;
+    const due = Math.max(0, interval - (Date.now() - state.rateAt));
+    const idle = state.rateManual && (!state.ticker || state.priceManual);
+    pollTimer = setTimeout(function tick() {
+      refresh();
+      pollTimer = setTimeout(tick, interval);
+    }, idle ? interval : due);
+  }
+  function stopPolling() { clearTimeout(pollTimer); pollTimer = null; }
+
+  // ---- events ----
+  for (const f of FIELDS) {
+    fieldEl[f].addEventListener('click', () => {
+      if (document.activeElement === el.ticker) el.ticker.blur();
+      setActive(f);
+    });
+  }
+
+  document.querySelector('.keypad').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-key]');
+    if (!btn) return;
+    if (document.activeElement === el.ticker) el.ticker.blur();
+    press(btn.dataset.key);
+    if (navigator.vibrate) navigator.vibrate(8);
+  });
+
+  // Hardware keyboard support (desktop / Bluetooth keyboards).
+  const KEYMAP = { '*': '×', 'x': '×', '/': '÷', 'Enter': '=', '=': '=', 'Backspace': '⌫', 'Escape': 'C', 'Delete': 'C' };
+  document.addEventListener('keydown', e => {
+    if (el.settings.open || e.target === el.ticker || e.ctrlKey || e.metaKey || e.altKey) return;
+    const key = KEYMAP[e.key] || (/^[\d.+-]$/.test(e.key) ? e.key : null);
+    if (!key) return;
+    e.preventDefault();
+    press(key);
+  });
+
+  el.ticker.addEventListener('keydown', e => { if (e.key === 'Enter') el.ticker.blur(); });
+  let tickerTimer = null;
+  el.ticker.addEventListener('input', () => {
+    state.ticker = el.ticker.value.trim().toUpperCase();
+    state.priceManual = false;
+    state.priceError = '';
+    state.priceAt = 0;
+    persist(); render();
+    clearTimeout(tickerTimer);
+    if (state.ticker && settings.apiKey) tickerTimer = setTimeout(refresh, 800);
+  });
+
+  el.rateManual.addEventListener('click', () => {
+    state.rateManual = false;
+    refresh(); startPolling();
+  });
+  el.priceManual.addEventListener('click', () => {
+    state.priceManual = false;
+    refresh();
+  });
+  el.refresh.addEventListener('click', () => {
+    state.rateManual = false;
+    state.priceManual = false;
+    refresh(); startPolling();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') startPolling(); else stopPolling();
+  });
+  window.addEventListener('online', () => { refresh(); startPolling(); });
+
+  // ---- settings dialog ----
+  const numericSettings = ['spread', 'feePct', 'feeCap', 'surgeThreshold'];
+  el.openSettings.addEventListener('click', () => {
+    el.apiKey.value = settings.apiKey;
+    for (const k of numericSettings) el[k].value = settings[k];
+    el.safety.checked = settings.safety;
+    el.settings.showModal();
+  });
+  el.settings.addEventListener('input', () => {
+    const keyChanged = settings.apiKey !== el.apiKey.value.trim();
+    settings.apiKey = el.apiKey.value.trim();
+    for (const k of numericSettings) settings[k] = parseNum(el[k].value);
+    settings.safety = el.safety.checked;
+    store.set('settings', settings);
+    if (keyChanged) state.history = [];
+    render();
+  });
+  el.settings.addEventListener('close', () => { refresh(); startPolling(); });
+  el.settings.addEventListener('click', e => { if (e.target === el.settings) el.settings.close(); });
+
+  // ---- long-press a display row to copy its value (plain digits, ready to paste into a broker app) ----
+  let toastTimer = null;
+  function toast(text) {
+    el.toast.textContent = text;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.toast.textContent = ''; }, 1600);
+  }
+  async function copyField(f) {
+    const v = state[f];
+    if (!(v > 0)) return;
+    const text = valueToExpr(f, v);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`${text} をコピーしました`);
+    } catch {
+      toast('コピーできませんでした');
+    }
+  }
+  let suppressClick = false;
+  for (const f of FIELDS) {
+    const node = fieldEl[f];
+    let timer = null;
+    const cancel = () => clearTimeout(timer);
+    node.addEventListener('pointerdown', () => {
+      cancel();
+      timer = setTimeout(() => {
+        suppressClick = true;
+        if (navigator.vibrate) navigator.vibrate(20);
+        copyField(f);
+      }, 550);
+    });
+    node.addEventListener('pointerup', cancel);
+    node.addEventListener('pointerleave', cancel);
+    node.addEventListener('pointercancel', cancel);
+    node.addEventListener('contextmenu', e => e.preventDefault());
+    node.addEventListener('click', e => {
+      if (suppressClick) { suppressClick = false; e.stopImmediatePropagation(); }
+    }, true);
+  }
+
+  // ---- boot ----
+  // Manual overrides are for the moment at hand; a relaunch goes back to the last fetched values.
+  if (state.rateManual) {
+    state.rateManual = false;
+    if (state.autoRate > 0) { state.rate = state.autoRate; exprs.rate = valueToExpr('rate', state.rate); }
+  }
+  if (state.priceManual) {
+    state.priceManual = false;
+    if (state.autoPrice > 0) { state.price = state.autoPrice; exprs.price = valueToExpr('price', state.price); }
+  }
+  el.ticker.value = state.ticker;
+  for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => setMode(b.dataset.mode));
+  $('fxSwap').addEventListener('click', () => {
+    commitField(active);
+    state.fxTop = state.fxTop === 'usd' ? 'jpy' : 'usd';
+    document.body.dataset.fxTop = state.fxTop;
+    // The currency moved to the top becomes the one being typed in.
+    state.fxSource = state.fxTop;
+    active = state.fxTop;
+    fresh = true;
+    persist(); drawFields(); render();
+  });
+  document.body.dataset.fxTop = state.fxTop;
+  syncFx();
+  setMode(state.mode);
+  setInterval(renderStatus, 5_000);
+  startPolling();
+
+  // Apply a new version as soon as it is installed, unless the user is mid-entry; then wait until the app is backgrounded.
+  if ('serviceWorker' in navigator) {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) return;
+      if (!touched) { location.reload(); return; }
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') location.reload();
+      }, { once: true });
+    });
+  }
+})();
+</script>
+</body>
+</html>
