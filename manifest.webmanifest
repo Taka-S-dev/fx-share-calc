@@ -1,6 +1,6 @@
 {
-  "name": "株数計算",
-  "short_name": "株数計算",
+  "name": "為替・株数電卓",
+  "short_name": "為替電卓",
   "description": "ドル建て株を予算で何株買えるか計算する",
   "start_url": "./",
   "scope": "./",
