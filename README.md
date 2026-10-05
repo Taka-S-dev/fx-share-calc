@@ -1,50 +1,52 @@
 # fx-share-calc
 
-An ad-free USD/JPY converter and share calculator for Japanese investors buying US stocks. It runs in the browser and installs to an Android home screen like a native app.
+日本語 | [English](README.en.md)
 
-**Live app: https://taka-s-dev.github.io/fx-share-calc/**
+米国株を円で買う人のための、広告なしのドル円電卓です。為替の換算と、予算で何株買えるかの計算ができます。ブラウザで動き、Android のホーム画面に追加すればアプリとして使えます。
+
+**アプリを開く: https://taka-s-dev.github.io/fx-share-calc/**
 
 <p>
-  <img src="docs/screenshot-fx.png" alt="Currency tab converting 25,000 USD to 3,750,000 JPY" width="280">
+  <img src="docs/screenshot-fx.png" alt="為替タブで 25,000ドルを 3,750,000円に換算している画面" width="280">
   &nbsp;
-  <img src="docs/screenshot-shares.png" alt="Shares tab showing 497 shares affordable with a 15,000,000 JPY budget" width="280">
+  <img src="docs/screenshot-shares.png" alt="株数タブで予算 1,500万円から 497株買えると表示している画面" width="280">
 </p>
 
-## Features
+## できること
 
-- Converts USD and JPY in either direction, and shows the yen cost including the broker's FX spread
-- Calculates how many shares a yen budget buys, after spread and trading fees, plus how much more is needed for one more share
-- Refreshes the rate every 60 seconds while the app is open, and flags sudden moves such as those around jobs reports or currency interventions
-- On-screen keypad that accepts arithmetic in every field, e.g. a budget of `2,000,000 − 150,000`
-- Long-press a number on the display to copy it for pasting into a broker app
-- Works offline with the last fetched rate
+- ドルと円をどちら向きにも換算し、証券会社の為替スプレッド込みの円額も表示
+- 円の予算で何株買えるかを、スプレッドと売買手数料込みで計算。あと何円で1株増えるかも表示
+- アプリを開いている間はレートを60秒ごとに更新し、雇用統計や為替介入のような急な値動きを知らせる
+- どの欄でも四則演算ができるテンキー（例: 予算に `2,000,000 − 150,000`）
+- 液晶の数字を長押しするとコピーでき、証券アプリにそのまま貼り付けられる
+- オフラインでも、最後に取得したレートで計算できる
 
-## Install on Android
+## スマホに入れる
 
-1. Open the live app in Chrome.
-2. Choose "Add to Home screen" from the menu.
+1. Android の Chrome でアプリを開く
+2. メニューから「ホーム画面に追加」を選ぶ
 
-The interface is in Japanese.
+## レートの取得元
 
-## Rate sources
-
-| Setup | Source | Update interval |
+| 設定 | 取得元 | 更新間隔 |
 | --- | --- | --- |
-| No API key (default) | [ExchangeRate-API open access](https://www.exchangerate-api.com/docs/free) | Once a day |
-| Twelve Data API key | [Twelve Data](https://twelvedata.com/) | Every 60 seconds, plus live stock prices by ticker |
+| APIキーなし（初期状態） | [ExchangeRate-API](https://www.exchangerate-api.com/docs/free) の無料版 | 1日1回 |
+| Twelve Data のAPIキーあり | [Twelve Data](https://twelvedata.com/) | 60秒ごと。銘柄を入れると株価も自動取得 |
 
-A Twelve Data key is free to obtain. Enter it in the settings screen (⚙). The key is stored only in the browser's local storage on that device and is sent only to Twelve Data. Polling stops while the app is in the background, so the free tier's daily quota is not used up.
+Twelve Data のAPIキーは無料で取得でき、アプリの設定（⚙）に入力します。キーはその端末のブラウザにだけ保存され、Twelve Data 以外には送信しません。
 
-Default fee settings (0.25 JPY spread, 0.495% commission capped at $22) are typical values; adjust them in settings to match your broker.
+無料プランの上限（1分8回・1日800回）に収まるよう、取得はアプリを開いている間だけ行い、複数のタブを開いていても1分1回にまとめます。上限に達した場合は、解除されるまで待ってから再開します。
 
-## How it is built
+手数料の初期値（スプレッド0.25円、手数料0.495%・上限22ドル）は一般的な値です。使っている証券会社に合わせて設定で変更してください。
 
-- A single `index.html` with plain HTML, CSS and JavaScript, with no framework and no build step
-- A service worker (`sw.js`) caches the app and fonts for offline use and updates the installed app automatically
-- Deployed with GitHub Pages from the `main` branch
+## 作り
 
-To run it locally, serve the folder over HTTP, for example `python -m http.server`, and open `http://localhost:8000`.
+- `index.html` 1ファイルの素の HTML・CSS・JavaScript。フレームワークもビルドも使っていません
+- Service Worker（`sw.js`）でアプリと書体をキャッシュし、オフラインで動作。更新があれば自動で新しい版に切り替わります
+- `main` ブランチから GitHub Pages で公開
 
-## License
+手元で動かすときは、フォルダを HTTP で配信して開きます（例: `python -m http.server` を実行して `http://localhost:8000` を開く）。
+
+## ライセンス
 
 [MIT](LICENSE)
