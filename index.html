@@ -150,6 +150,11 @@
     font-size: 24px;
   }
   .field .value > span { flex: none; }
+  /* Still too long at the minimum size: the tail stays visible and the cut-off left edge fades out. */
+  .field .value.clipped {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 1.2em);
+    mask-image: linear-gradient(to right, transparent, #000 1.2em);
+  }
   .field .expr { font-family: "BIZ UDGothic", "BIZ UDPGothic", sans-serif; font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 2px; }
   .field .unit { font-size: .6em; font-weight: 700; margin-right: 4px; }
   .field .empty { color: rgb(26 31 18 / .35); }
@@ -588,6 +593,7 @@
       node.classList.toggle('fresh', f === active && fresh);
       node.classList.toggle('derived', f === fxDerived());
     }
+    fitFields();
   }
 
   const fxDerived = () => state.fxSource === 'usd' ? 'jpy' : 'usd';
@@ -652,6 +658,8 @@
         if (last === '0') e = e.slice(0, -1);
         e += (key === '00' && (last === '' || last === '0')) ? '0' : key;
       }
+      // 12 digits per number, like a desk calculator; beyond ~15 digits JS numbers lose precision.
+      if (e.match(/[\d.]*$/)[0].replace(/\..*/, '').length > 12) return;
       if (e.replace(/\D/g, '').length > 24) return;
     }
     fresh = key === '=';
@@ -699,6 +707,43 @@
     return range >= settings.surgeThreshold ? range : null;
   }
 
+  // ---- fit long numbers ----
+  // Like a phone calculator: shrink the digits to fit the row, down to half size, then clip from the left.
+  const MIN_SCALE = 0.5;
+
+  function fitFields() {
+    for (const f of FIELDS) {
+      const v = fieldEl[f].querySelector('.value');
+      v.style.fontSize = '';
+      v.classList.remove('clipped');
+      const avail = v.clientWidth;
+      if (!avail) continue; // hidden in the other mode
+      // Margins and padding don't scale with the font, so re-measure until it fits.
+      const measure = () => [...v.children].reduce((w, c) => w + c.getBoundingClientRect().width, 0) + 4;
+      const base = parseFloat(getComputedStyle(v).fontSize);
+      const floor = base * MIN_SCALE;
+      let size = base;
+      for (let i = 0; i < 4; i++) {
+        const content = measure();
+        if (content <= avail || size === floor) break;
+        size = Math.max(floor, size * (avail / content) * 0.99);
+        v.style.fontSize = `${size}px`;
+      }
+      v.classList.toggle('clipped', measure() > avail);
+    }
+  }
+
+  function fitShares() {
+    el.shares.style.setProperty('--shrink', 1);
+    const line = el.shares.closest('.shares-line');
+    if (!line.clientWidth) return;
+    const caption = line.querySelector('.caption');
+    const unit = line.querySelector('.shares-unit');
+    const avail = line.clientWidth - caption.offsetWidth - unit.offsetWidth - 18;
+    const width = el.shares.offsetWidth;
+    if (width > avail) el.shares.style.setProperty('--shrink', Math.max(MIN_SCALE, avail / width));
+  }
+
   // ---- render ----
   function render() {
     const surge = surgeInfo();
@@ -708,8 +753,6 @@
 
     if (r) {
       el.shares.innerHTML = tightCommas(r.n.toLocaleString('ja-JP'));
-      const len = el.shares.textContent.length;
-      el.shares.style.setProperty('--shrink', len <= 4 ? 1 : len <= 6 ? 0.78 : 0.6);
       el.used.innerHTML = tightCommas(yen(r.used));
       el.left.innerHTML = tightCommas(yen(state.budget - r.used));
       el.next.textContent = `あと ${yen(r.extra)} で ${(r.n + 1).toLocaleString('ja-JP')}株`;
@@ -720,7 +763,6 @@
       el.calcNote.classList.toggle('warn', useSafety);
     } else {
       el.shares.textContent = '–';
-      el.shares.style.setProperty('--shrink', 1);
       el.used.textContent = '–';
       el.left.textContent = '–';
       el.next.textContent = '';
@@ -745,6 +787,7 @@
     el.rateManual.hidden = !state.rateManual;
     el.priceManual.hidden = !(state.priceManual && state.ticker && settings.apiKey);
     renderStatus();
+    fitShares();
   }
 
   function setStatus(node, text, isError) {
@@ -961,6 +1004,8 @@
     if (document.visibilityState === 'visible') startPolling(); else stopPolling();
   });
   window.addEventListener('online', () => { refresh(); startPolling(); });
+  window.addEventListener('resize', () => { fitFields(); fitShares(); });
+  document.fonts.ready.then(() => { fitFields(); fitShares(); });
 
   // ---- settings dialog ----
   const numericSettings = ['spread', 'feePct', 'feeCap', 'surgeThreshold'];
