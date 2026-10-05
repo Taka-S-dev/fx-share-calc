@@ -1,4 +1,4 @@
-const CACHE = 'calcfxrate-v20';
+const CACHE = 'calcfxrate-v22';
 const FONT_CACHE = 'calcfxrate-fonts';
 const ASSETS = ['./', 'index.html', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 

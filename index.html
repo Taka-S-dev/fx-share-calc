@@ -481,6 +481,7 @@
 
   const POLL_MS = 60_000;
   const SURGE_WINDOW_MS = 15 * 60_000;
+  const RATE_REUSE_MS = 30_000;
   const DEFAULTS = { apiKey: '', spread: 0.25, feePct: 0.495, feeCap: 22, surgeThreshold: 0.5, safety: true };
   const MODE_FIELDS = {
     shares: () => ['budget', 'price', 'rate'],
@@ -644,7 +645,7 @@
     fresh = true;
     store.set('mode', mode);
     drawFields(); render();
-    if (mode === 'shares' && state.ticker && settings.apiKey && !state.priceManual) refresh();
+    if (mode === 'shares' && state.ticker && settings.apiKey && !state.priceManual) refresh({ reason: 'user' });
   }
 
   function commitField(field) {
@@ -835,10 +836,14 @@
   }
 
   function renderStatus() {
+    const cooldown = settings.apiKey ? store.get('cooldownUntil', 0) - Date.now() : 0;
     const staleAfter = settings.apiKey ? 5 * 60_000 : 36 * 3600_000;
     el.stale.hidden = state.rateManual || !state.rateAt || Date.now() - state.rateAt < staleAfter;
     if (state.rateManual) {
       setStatus(el.rateStatus, '手動入力中 (自動更新は停止)');
+    } else if (cooldown > 0) {
+      const wait = cooldown > 3600_000 ? '明日' : `${Math.ceil(cooldown / 1000)}秒後に`;
+      setStatus(el.rateStatus, `${state.rateError || 'API回数の上限です'}。${wait}再開します`, true);
     } else if (state.rateError) {
       setStatus(el.rateStatus, `取得失敗: ${state.rateError}` + (state.rateAt ? ` / ${ago(state.rateAt)}の値を使用` : ''), true);
     } else if (state.rateAt) {
@@ -862,8 +867,14 @@
     }
   }
 
+  // Never overwrite a newer rate or price that another tab has already stored.
+  const RATE_KEYS = ['rate', 'rateAt', 'rateSource', 'autoRate', 'history'];
+  const PRICE_KEYS = ['price', 'priceAt', 'autoPrice'];
   function persist() {
+    const olderRate = store.get('rateAt', 0) > state.rateAt;
+    const olderPrice = store.get('priceAt', 0) > state.priceAt;
     for (const k of ['mode', 'usd', 'jpy', 'fxSource', 'fxTop', 'budget', 'ticker', 'price', 'rate', 'priceManual', 'rateManual', 'priceAt', 'rateAt', 'rateSource', 'autoRate', 'autoPrice', 'history']) {
+      if ((olderRate && RATE_KEYS.includes(k)) || (olderPrice && PRICE_KEYS.includes(k))) continue;
       store.set(k, state[k]);
     }
   }
@@ -900,12 +911,9 @@
     exprs.price = valueToExpr('price', price);
   }
 
-  async function fetchTwelveData() {
-    const symbols = [];
-    if (!state.rateManual) symbols.push('USD/JPY');
-    const wantPrice = state.mode === 'shares' && state.ticker && !state.priceManual;
-    if (wantPrice) symbols.push(state.ticker);
-    if (!symbols.length) return;
+  async function fetchTwelveData(symbols) {
+    const wantRate = symbols.includes('USD/JPY');
+    const wantPrice = symbols.includes(state.ticker);
 
     const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbols.join(','))}&apikey=${encodeURIComponent(settings.apiKey)}`;
     const data = await fetchJson(url);
@@ -913,14 +921,21 @@
       state.priceError = '銘柄が見つかりません';
       return;
     }
+    if (data.status === 'error' && data.code === 429) {
+      // Twelve Data answers 429 both for the per-minute cap and for the daily credits; wait out whichever it is.
+      const daily = /day/i.test(data.message || '');
+      const until = daily ? new Date().setUTCHours(24, 0, 5, 0) : Date.now() + 61_000;
+      store.set('cooldownUntil', until);
+      throw new Error(daily ? '今日のAPI回数を使い切りました' : '1分あたりのAPI回数の上限です');
+    }
     if (data.status === 'error') {
-      const known = { 401: 'APIキーが正しくありません', 429: 'API回数の上限に達しました' };
+      const known = { 401: 'APIキーが正しくありません' };
       throw new Error(known[data.code] || 'APIエラー');
     }
 
     // A single symbol returns {price}, several return {SYMBOL: {price}}.
     const pick = sym => (symbols.length === 1 ? data : data[sym]) || {};
-    if (!state.rateManual) {
+    if (wantRate) {
       const d = pick('USD/JPY');
       const r = parseFloat(d.price);
       if (r > 0) applyRate(r, 'Twelve Dataのレート');
@@ -944,14 +959,78 @@
     state.history = [];
   }
 
+  // Twelve Data's free tier allows 8 credits a minute (one per symbol requested) and 800 a day, shared by
+  // every tab and device using the key. Tabs on this device keep one credit log in localStorage, so together
+  // they stay inside the per-minute cap; anything due is fetched once and the other tabs adopt it.
+  const MINUTE_BUDGET = 7; // one credit spare for another device on the same key
+  const DUE_MS = POLL_MS - 5_000;
+  const MANUAL_MIN_MS = 10_000;
+  const CLAIM_MS = 10_000;
+
+  const recentCredits = now => store.get('creditLog', []).filter(e => now - e.t < 60_000);
+  function spendCredits(n, now) { store.set('creditLog', [...recentCredits(now), { t: now, c: n }]); }
+  // Milliseconds until `need` more credits fit in the rolling one-minute window.
+  function budgetWait(need, now) {
+    const log = recentCredits(now).sort((x, y) => x.t - y.t);
+    let used = log.reduce((n, e) => n + e.c, 0);
+    if (used + need <= MINUTE_BUDGET) return 0;
+    for (const e of log) {
+      used -= e.c;
+      if (used + need <= MINUTE_BUDGET) return e.t + 60_000 - now + 250;
+    }
+    return 60_000;
+  }
+
+  // auto: periodic check, fetch only what is due. user: a lookup the user just asked for, reusing a rate
+  // that is under 30 s old. manual: the refresh button, always re-fetching the rate.
+  function plannedSymbols(reason, now) {
+    const symbols = [];
+    const rateAge = now - state.rateAt;
+    if (!state.rateManual && (reason === 'manual' || rateAge >= (reason === 'auto' ? DUE_MS : RATE_REUSE_MS))) {
+      symbols.push('USD/JPY');
+    }
+    const priceAge = now - state.priceAt;
+    if (state.mode === 'shares' && state.ticker && !state.priceManual &&
+        (reason === 'manual' || priceAge >= (reason === 'auto' ? DUE_MS : RATE_REUSE_MS))) {
+      symbols.push(state.ticker);
+    }
+    return symbols;
+  }
+
   let inFlight = null;
-  function refresh() {
+  let retryTimer = null;
+  function refresh({ reason = 'auto' } = {}) {
     if (inFlight) return inFlight;
+    let symbols = null;
+    if (settings.apiKey) {
+      const now = Date.now();
+      adoptStored();
+      if (store.get('cooldownUntil', 0) > now) { render(); return Promise.resolve(); }
+      if (reason === 'manual' && now - state.rateAt < MANUAL_MIN_MS) {
+        toast('取得したばかりです。少し待ってから更新してください');
+        return Promise.resolve();
+      }
+      // Another tab has just started its periodic fetch; the result arrives through the storage event.
+      if (reason === 'auto' && now - store.get('fetchStartedAt', 0) < CLAIM_MS) return Promise.resolve();
+      symbols = plannedSymbols(reason, now);
+      if (!symbols.length) return Promise.resolve();
+      const wait = budgetWait(symbols.length, now);
+      if (wait > 0) {
+        if (reason !== 'auto') {
+          toast(`API回数の上限に近いため、${Math.ceil(wait / 1000)}秒後に取得します`);
+          clearTimeout(retryTimer);
+          retryTimer = setTimeout(() => refresh({ reason }), wait);
+        }
+        return Promise.resolve();
+      }
+      spendCredits(symbols.length, now);
+      store.set('fetchStartedAt', now);
+    }
     el.refresh.disabled = true;
     el.refresh.textContent = '更新中…';
     inFlight = (async () => {
       try {
-        if (settings.apiKey) await fetchTwelveData();
+        if (settings.apiKey) await fetchTwelveData(symbols);
         else await fetchDailyRate();
       } catch (e) {
         // fetch() rejects with a TypeError when the network or DNS fails; that message is browser-specific English.
@@ -972,20 +1051,60 @@
     return inFlight;
   }
 
+  // Another tab (or this one before a reload) fetched: take its values instead of spending credits.
+  function adoptStored() {
+    if (!state.rateManual) {
+      const at = store.get('rateAt', 0);
+      if (at > state.rateAt) {
+        state.rate = store.get('rate', state.rate);
+        state.rateAt = at;
+        state.rateSource = store.get('rateSource', state.rateSource);
+        state.autoRate = store.get('autoRate', state.autoRate);
+        state.history = store.get('history', state.history);
+        state.rateError = '';
+        exprs.rate = valueToExpr('rate', state.rate);
+        syncFx();
+      }
+    }
+    if (!state.priceManual && store.get('ticker', '') === state.ticker) {
+      const at = store.get('priceAt', 0);
+      if (at > state.priceAt) {
+        state.price = store.get('price', state.price);
+        state.priceAt = at;
+        state.autoPrice = store.get('autoPrice', state.autoPrice);
+        state.priceError = '';
+        exprs.price = valueToExpr('price', state.price);
+      }
+    }
+    drawFields(); render();
+  }
+  window.addEventListener('storage', e => {
+    if (['rateAt', 'priceAt'].includes(e.key)) adoptStored();
+  });
+
   // Poll only while the app is visible, so the free-tier quota isn't spent in the background.
   let pollTimer = null;
   function startPolling() {
     stopPolling();
     if (document.visibilityState !== 'visible') return;
-    const interval = settings.apiKey ? POLL_MS : 60 * 60_000;
-    const due = Math.max(0, interval - (Date.now() - state.rateAt));
-    const idle = state.rateManual && (!state.ticker || state.priceManual);
-    pollTimer = setTimeout(function tick() {
+    if (settings.apiKey) {
+      // Check often; refresh() decides whether anything is due and keeps within the credit budget.
+      // The jitter keeps two open tabs from checking in the same instant and both fetching.
       refresh();
-      pollTimer = setTimeout(tick, interval);
-    }, idle ? interval : due);
+      pollTimer = setTimeout(function check() {
+        refresh();
+        pollTimer = setTimeout(check, 12_000 + Math.random() * 6_000);
+      }, 12_000 + Math.random() * 6_000);
+    } else {
+      const interval = 60 * 60_000;
+      const due = Math.max(0, interval - (Date.now() - state.rateAt));
+      pollTimer = setTimeout(function tick() {
+        refresh();
+        pollTimer = setTimeout(tick, interval);
+      }, state.rateManual ? interval : due);
+    }
   }
-  function stopPolling() { clearTimeout(pollTimer); pollTimer = null; }
+  function stopPolling() { clearTimeout(pollTimer); clearInterval(pollTimer); pollTimer = null; }
 
   // ---- events ----
   for (const f of FIELDS) {
@@ -1014,29 +1133,30 @@
   });
 
   el.ticker.addEventListener('keydown', e => { if (e.key === 'Enter') el.ticker.blur(); });
-  let tickerTimer = null;
   el.ticker.addEventListener('input', () => {
     state.ticker = el.ticker.value.trim().toUpperCase();
     state.priceManual = false;
     state.priceError = '';
     state.priceAt = 0;
     persist(); render();
-    clearTimeout(tickerTimer);
-    if (state.ticker && settings.apiKey) tickerTimer = setTimeout(refresh, 800);
+  });
+  // Look the ticker up once the entry is committed (Enter or leaving the field), not on every keystroke.
+  el.ticker.addEventListener('change', () => {
+    if (state.ticker && settings.apiKey) refresh({ reason: 'user' });
   });
 
   el.rateManual.addEventListener('click', () => {
     state.rateManual = false;
-    refresh(); startPolling();
+    refresh({ reason: 'user' }); startPolling();
   });
   el.priceManual.addEventListener('click', () => {
     state.priceManual = false;
-    refresh();
+    refresh({ reason: 'user' });
   });
   el.refresh.addEventListener('click', () => {
     state.rateManual = false;
     state.priceManual = false;
-    refresh(); startPolling();
+    refresh({ reason: 'manual' }); startPolling();
   });
 
   document.addEventListener('visibilitychange', () => {
@@ -1048,10 +1168,12 @@
 
   // ---- settings dialog ----
   const numericSettings = ['spread', 'feePct', 'feeCap', 'surgeThreshold'];
+  let keyAtOpen = '';
   el.openSettings.addEventListener('click', () => {
     el.apiKey.value = settings.apiKey;
     for (const k of numericSettings) el[k].value = settings[k];
     el.safety.checked = settings.safety;
+    keyAtOpen = settings.apiKey;
     el.settings.showModal();
   });
   el.settings.addEventListener('input', () => {
@@ -1063,7 +1185,10 @@
     if (keyChanged) state.history = [];
     render();
   });
-  el.settings.addEventListener('close', () => { refresh(); startPolling(); });
+  el.settings.addEventListener('close', () => {
+    if (settings.apiKey !== keyAtOpen) { store.set('cooldownUntil', 0); refresh({ reason: 'manual' }); }
+    startPolling();
+  });
   el.settings.addEventListener('click', e => { if (e.target === el.settings) el.settings.close(); });
 
   // ---- long-press a display row to copy its value (plain digits, ready to paste into a broker app) ----
