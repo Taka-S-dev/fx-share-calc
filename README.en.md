@@ -16,7 +16,7 @@ An ad-free USD/JPY converter and share calculator for Japanese investors buying 
 
 - Converts USD and JPY in either direction, and shows the yen cost including the broker's FX spread
 - Calculates how many shares a yen budget buys, after spread and trading fees, plus how much more is needed for one more share
-- Refreshes the rate every 60 seconds while the app is open, and flags sudden moves such as those around jobs reports or currency interventions
+- With a Twelve Data API key, refreshes the rate every 60 seconds while the app is open, and flags sudden moves such as those around jobs reports or currency interventions
 - On-screen keypad that accepts arithmetic in every field, e.g. a budget of `2,000,000 − 150,000`
 - Long-press a number on the display to copy it for pasting into a broker app
 - Works offline with the last fetched rate
