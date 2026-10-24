@@ -1,0 +1,21 @@
+# Allowlist: ignore everything, then re-include the app's own files.
+# A new file at the root needs its own line here before git add sees it.
+*
+!*/
+!/.gitignore
+!/LICENSE
+!/README.md
+!/README.en.md
+!/index.html
+!/sw.js
+!/manifest.webmanifest
+!/icon.svg
+!/icon-*.png
+!/docs/*.png
+
+# Keep secrets out even if a pattern above would admit them.
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
